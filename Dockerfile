@@ -1,6 +1,10 @@
 FROM python:3.11-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+# gcc + libc6-dev: on CUDA, torch runs some ops (e.g. the matmul in
+# ModernBERT's rotary embedding) through Triton, which compiles a small C
+# helper against the CUDA driver on first use. Without a C compiler every
+# /predict fails with "RuntimeError: Failed to find C compiler".
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates gcc libc6-dev \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
