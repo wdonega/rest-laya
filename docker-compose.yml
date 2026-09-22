@@ -1,0 +1,40 @@
+services:
+  rest-laya:
+    container_name: rest-laya
+    build: .
+    ports:
+      - "8055:8055"
+    environment:
+      # Comma-separated checkpoint names to preload. Valid values:
+      # english, multilingual, typed-decisions.
+      - LAYA_MODELS=english
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+
+    # Each checkpoint listed in LAYA_MODELS is a separate set of weights
+    # kept resident in memory (~800MB-1GB each). With just "english" the
+    # default Docker Desktop VM (~2GB) is enough; loading 2-3 checkpoints
+    # can OOM-kill the container (exit code 137). Uncomment and raise the
+    # limits below if LAYA_MODELS has more than one entry.
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 4g
+    #     reservations:
+    #       memory: 2g
+
+    # Uncomment if running on GPU with nvidia-container-toolkit installed:
+    # devices:
+    #   - driver: nvidia
+    #     count: 1
+    #     capabilities: [gpu]
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8055/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  hf-cache:
