@@ -8,6 +8,23 @@ services:
       # Comma-separated checkpoint names to preload. Valid values:
       # english, multilingual, typed-decisions.
       - LAYA_MODELS=english
+      # Bearer token required on /predict and /v1/systemone, checked
+      # against the request's "Authorization: Bearer <token>" header.
+      # Leave empty (or unset entirely) to disable auth -- any request is
+      # then accepted with no Authorization header needed.
+      - LAYA_API_TOKEN=
+      # Turns jev API compatibility on/off. On by default. When on:
+      #   - the /v1/systemone endpoint responds (same as /predict); it's
+      #     a 404 when off.
+      #   - the `model` field also accepts any jev model id (jev-*, e.g.
+      #     jev-latest, jev-1.13.0), which resolves to the default
+      #     checkpoint (same as omitting `model`).
+      # Set to "false" to turn it off (an empty value keeps it on).
+      - LAYA_JEV_COMPAT=true
+      # How many predictions run at once; extra requests wait their turn.
+      # Keep 1 on CPU: one forward pass already uses every core, so more
+      # in parallel just fight over them. Raise it on GPU.
+      - LAYA_MAX_CONCURRENT_PREDICTIONS=1
     volumes:
       - hf-cache:/root/.cache/huggingface
 
@@ -16,21 +33,28 @@ services:
     # default Docker Desktop VM (~2GB) is enough; loading 2-3 checkpoints
     # can OOM-kill the container (exit code 137). Uncomment and raise the
     # limits below if LAYA_MODELS has more than one entry.
+    #
+    # To run on GPU (needs nvidia-container-toolkit on the host), also
+    # uncomment the `devices` block and switch requirements.txt to the
+    # CUDA torch build -- see "Running with CUDA" in the README. `devices`
+    # must stay nested under deploy.resources.reservations: a service-level
+    # `devices:` key means something else (host device paths) and rejects
+    # this syntax.
     # deploy:
     #   resources:
     #     limits:
     #       memory: 4g
     #     reservations:
     #       memory: 2g
-
-    # Uncomment if running on GPU with nvidia-container-toolkit installed:
-    # devices:
-    #   - driver: nvidia
-    #     count: 1
-    #     capabilities: [gpu]
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
 
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8055/health"]
+      # python:3.11-slim ships without curl, so probe with the stdlib instead.
+      # urlopen raises on non-2xx, which makes the check fail.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8055/health', timeout=4)"]
       interval: 10s
       timeout: 5s
       retries: 5
