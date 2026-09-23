@@ -6,16 +6,9 @@ uvicorn[standard]==0.32.*
 laya==0.3.5
 pydantic==2.*
 
-# CPU-only torch build on Linux/Docker (~200MB instead of ~3GB of bundled
-# CUDA libraries). The +cpu wheel only exists on PyTorch's own index, hence
-# the extra index. macOS has no +cpu variant -- its regular PyPI wheel is
-# already CPU/MPS-only, so local runs on a Mac use that.
-#
-# To run on an NVIDIA GPU instead, replace the Linux lines below with:
-#   --extra-index-url https://download.pytorch.org/whl/cu130
-#   torch==2.14.0+cu130 ; sys_platform == "linux"
-# and see "Running with CUDA" in the README (docker-compose.yml needs a
-# change too).
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.14.0+cpu ; sys_platform == "linux"
-torch==2.14.0 ; sys_platform != "linux"
+# Plain version pin on purpose. In Docker, the Dockerfile installs torch
+# first, picking the CPU or CUDA build via the TORCH_VARIANT build arg
+# (e.g. 2.14.0+cpu), and that local-version build already satisfies this
+# line. Outside Docker, pip takes it from PyPI (CPU/MPS on macOS). Keep in
+# sync with TORCH_VERSION in the Dockerfile.
+torch==2.14.0

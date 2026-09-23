@@ -1,7 +1,12 @@
 services:
   rest-laya:
     container_name: rest-laya
-    build: .
+    build:
+      context: .
+      args:
+        # torch build: cpu here; docker-compose.cuda.yml switches it to CUDA.
+        # Overridable from the shell or .env, e.g. TORCH_VARIANT=cu130.
+        TORCH_VARIANT: ${TORCH_VARIANT:-cpu}
     ports:
       - "8055:8055"
     environment:
@@ -23,7 +28,7 @@ services:
       - LAYA_JEV_COMPAT=true
       # How many predictions run at once; extra requests wait their turn.
       # Keep 1 on CPU: one forward pass already uses every core, so more
-      # in parallel just fight over them. Raise it on GPU.
+      # in parallel just fight over them. docker-compose.cuda.yml raises it.
       - LAYA_MAX_CONCURRENT_PREDICTIONS=1
     volumes:
       - hf-cache:/root/.cache/huggingface
@@ -33,23 +38,14 @@ services:
     # default Docker Desktop VM (~2GB) is enough; loading 2-3 checkpoints
     # can OOM-kill the container (exit code 137). Uncomment and raise the
     # limits below if LAYA_MODELS has more than one entry.
-    #
-    # To run on GPU (needs nvidia-container-toolkit on the host), also
-    # uncomment the `devices` block and switch requirements.txt to the
-    # CUDA torch build -- see "Running with CUDA" in the README. `devices`
-    # must stay nested under deploy.resources.reservations: a service-level
-    # `devices:` key means something else (host device paths) and rejects
-    # this syntax.
+    # For CUDA, don't edit this file: layer docker-compose.cuda.yml on top
+    # (see "Running with CUDA" in the README).
     # deploy:
     #   resources:
     #     limits:
     #       memory: 4g
     #     reservations:
     #       memory: 2g
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
 
     healthcheck:
       # python:3.11-slim ships without curl, so probe with the stdlib instead.

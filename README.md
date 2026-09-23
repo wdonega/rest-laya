@@ -29,7 +29,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8055
 docker compose up --build
 ```
 
-By default this builds a **CPU-only** image: `requirements.txt` installs the
+By default this builds a **CPU-only** image: the Dockerfile installs the
 `torch==…+cpu` wheel, which skips ~3GB of CUDA libraries.
 
 ## Running with CUDA
@@ -38,20 +38,27 @@ Needs a Linux host with an NVIDIA GPU, its driver, and
 [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
 Docker Desktop on macOS can't pass a GPU through, so this doesn't apply there.
 
-1. In `requirements.txt`, swap the CPU torch lines for the CUDA ones (the
-   exact lines are in the comment above them):
-   ```
-   --extra-index-url https://download.pytorch.org/whl/cu130
-   torch==2.14.0+cu130 ; sys_platform == "linux"
-   ```
-2. In `docker-compose.yml`, uncomment the `deploy:` block, including its
-   `devices:` part. That's what hands the GPU to the container.
-3. Rebuild: `docker compose up --build`.
+No file edits: `docker-compose.cuda.yml` layers the CUDA settings on top of
+`docker-compose.yml` (CUDA torch build, the GPU reservation, more concurrent
+predictions).
+
+1. On the CUDA host, once: `cp .env.example .env` and uncomment the
+   `COMPOSE_FILE` line.
+2. `docker compose up -d --build`
+
+Without a `.env`, the same thing in one line:
+`docker compose -f docker-compose.yml -f docker-compose.cuda.yml up -d --build`.
+
+The CUDA overlay installs `cu132` (CUDA 13.2, e.g. a Jetson Orin on JetPack
+7.2). For a host on another CUDA version, set `TORCH_VARIANT` in `.env` to
+the matching suffix from [PyTorch's wheel index](https://download.pytorch.org/whl/)
+(e.g. `cu130`, `cu126`).
 
 No app change is needed: laya picks `cuda` automatically when
 `torch.cuda.is_available()` is true. To confirm, run
-`docker compose exec rest-laya python -c "import torch; print(torch.cuda.is_available())"`.
-It should print `True`.
+`docker compose exec rest-laya python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_arch_list())"`.
+It should print `True`, and the list should include your GPU's arch (e.g.
+`sm_87` on an Orin).
 
 ## Trying it out
 
