@@ -14,15 +14,28 @@ services:
         # CUDA version matching the host driver (e.g. cu132). See the
         # Dockerfile.
         TORCH_VARIANT: ${TORCH_VARIANT:-cpu}
-    # nvidia hands the host's GPUs to the container. It's the runtime
-    # nvidia-container-toolkit registers with Docker (`docker info | grep
-    # -i runtimes` should list it); runc is Docker's default, no GPU.
+    # --- NVIDIA ---------------------------------------------------------
+    # The GPU is handed over by the NVIDIA container runtime, picked here
+    # per env file: nvidia in .env.cuda, runc (Docker's default, no GPU)
+    # in .env.cpu. nvidia-container-toolkit registers the nvidia runtime
+    # with Docker; `docker info | grep -i runtimes` should list it, and if
+    # it doesn't: sudo nvidia-ctk runtime configure --runtime=docker &&
+    # sudo systemctl restart docker.
+    #
+    # This is used instead of the usual deploy.resources.reservations
+    # .devices block (driver: nvidia, capabilities: [gpu]) because that
+    # block can't be switched off by a variable: with it, the CPU build
+    # fails to start on hosts without the NVIDIA driver.
+    # The NVIDIA_* variables under `environment` configure this runtime.
     runtime: ${DOCKER_RUNTIME:-runc}
     ports:
       - "8055:8055"
     environment:
-      # Which GPUs the nvidia runtime exposes; ignored under runc.
+      # NVIDIA runtime settings (ignored under runc): which GPUs it exposes,
+      # and which driver features -- compute is CUDA itself, utility adds
+      # nvidia-smi.
       NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
       # Comma-separated checkpoint names to preload. Valid values:
       # english, multilingual, typed-decisions.
       LAYA_MODELS: ${LAYA_MODELS:-english}
@@ -47,14 +60,17 @@ services:
     volumes:
       - hf-cache:/root/.cache/huggingface
 
-    # Each checkpoint listed in LAYA_MODELS is a separate set of weights
-    # kept resident in memory (~800MB-1GB each; on GPU they're also loaded
-    # through host RAM first). Raise the limit if LAYA_MODELS has more
-    # than one entry, or the container can be OOM-killed (exit code 137).
-    deploy:
-      resources:
-        limits:
-          memory: ${MEMORY_LIMIT:-4g}
+    # Memory limit, off by default. Each checkpoint in LAYA_MODELS is a
+    # separate set of weights kept resident in memory (~800MB-1GB each; on
+    # GPU they're also loaded through host RAM first), so budget ~1GB per
+    # entry plus ~1GB for the process. Without a limit the container can
+    # use all of the host's (or Docker Desktop VM's) memory; with one set
+    # too low it's OOM-killed (exit code 137). Uncomment to cap it, e.g.
+    # 4g for all 3 checkpoints.
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 4g
 
     healthcheck:
       # python:3.11-slim ships without curl, so probe with the stdlib instead.
