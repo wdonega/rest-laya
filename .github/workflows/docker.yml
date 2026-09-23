@@ -62,6 +62,9 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           build-args: TORCH_VARIANT=${{ matrix.variant }}
+          # No build-provenance attestation: buildx stores it as an extra
+          # manifest that GHCR lists as an "unknown/unknown" platform.
+          provenance: false
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
