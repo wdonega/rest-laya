@@ -16,7 +16,7 @@ WORKDIR /app
 #   cu132 -- CUDA 13.2, e.g. a Jetson Orin on JetPack 7.2 (its aarch64 wheel
 #            has the sm_87 kernels the cu130 one lacks).
 # A CUDA variant must match the host driver's CUDA version. Usually set
-# through the cuda service in docker-compose.yml rather than by hand.
+# through .env.cuda rather than by hand.
 ARG TORCH_VARIANT=cpu
 # Keep in sync with the torch pin in requirements.txt.
 ARG TORCH_VERSION=2.14.0

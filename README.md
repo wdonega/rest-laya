@@ -25,9 +25,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8055
 
 ## Running with Docker
 
-Each build has a ready-made env file, which picks the service (through a
-[Compose profile](https://docs.docker.com/compose/how-tos/profiles/)) and
-sets the `LAYA_*` values:
+`docker-compose.yml` has a single service; each build has a ready-made env
+file with the values that differ (torch build, Docker runtime, `LAYA_*`):
 
 ```bash
 docker compose --env-file .env.cpu up --build
@@ -49,8 +48,10 @@ Docker Desktop on macOS can't pass a GPU through, so this doesn't apply there.
 docker compose --env-file .env.cuda up -d --build
 ```
 
-The `cuda` service installs the CUDA torch build, reserves the GPU and runs
-more predictions at once.
+`.env.cuda` installs the CUDA torch build, runs the container under the
+`nvidia` runtime (which hands it the GPU) and runs more predictions at once.
+nvidia-container-toolkit registers that runtime with Docker; check with
+`docker info | grep -i runtimes`, which should list `nvidia`.
 
 It installs `cu132` (CUDA 13.2, e.g. a Jetson Orin on JetPack 7.2). For a
 host on another CUDA version, set `TORCH_VARIANT` in `.env.cuda` to the matching

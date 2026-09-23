@@ -1,110 +1,69 @@
-# One service per build, each behind a Compose profile (cpu, cuda). Pick
-# one with its ready-made env file, which sets the profile and the values
-# below:
+# Everything that differs between the CPU and CUDA builds is a variable,
+# set by a ready-made env file:
 #   docker compose --env-file .env.cpu up -d --build
 #   docker compose --env-file .env.cuda up -d --build
-# Both use the container name rest-laya, so run only one at a time.
-
-# Settings shared by both services. `<<:` merges are shallow: a service
-# that sets `environment` or `build` replaces the whole key, which is why
-# the environment has its own anchor to merge from.
-#
-# Each value below is a default, used when the env file (or the shell)
-# doesn't set that variable.
-x-environment: &environment
-  # Comma-separated checkpoint names to preload. Valid values:
-  # english, multilingual, typed-decisions.
-  LAYA_MODELS: ${LAYA_MODELS:-english}
-  # Bearer token required on /predict and /v1/systemone, checked
-  # against the request's "Authorization: Bearer <token>" header.
-  # Leave empty (or unset entirely) to disable auth -- any request is
-  # then accepted with no Authorization header needed.
-  LAYA_API_TOKEN: ${LAYA_API_TOKEN:-}
-  # Turns jev API compatibility on/off. On by default. When on:
-  #   - the /v1/systemone endpoint responds (same as /predict); it's
-  #     a 404 when off.
-  #   - the `model` field also accepts any jev model id (jev-*, e.g.
-  #     jev-latest, jev-1.13.0), which resolves to the default
-  #     checkpoint (same as omitting `model`).
-  # Set to "false" to turn it off (an empty value keeps it on).
-  LAYA_JEV_COMPAT: ${LAYA_JEV_COMPAT:-true}
-  # How many predictions run at once; extra requests wait their turn.
-  # Keep 1 on CPU: one forward pass already uses every core, so more
-  # in parallel just fight over them. The cuda service raises it.
-  LAYA_MAX_CONCURRENT_PREDICTIONS: ${LAYA_MAX_CONCURRENT_PREDICTIONS:-1}
-
-x-rest-laya: &rest-laya
-  container_name: rest-laya
-  ports:
-    - "8055:8055"
-  environment: *environment
-  volumes:
-    - hf-cache:/root/.cache/huggingface
-  healthcheck:
-    # python:3.11-slim ships without curl, so probe with the stdlib instead.
-    # urlopen raises on non-2xx, which makes the check fail.
-    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8055/health', timeout=4)"]
-    interval: 10s
-    timeout: 5s
-    retries: 5
-    start_period: 60s
-
+# The defaults below (after `:-`) are the CPU build's, so a plain
+# `docker compose up --build` also works.
 services:
   rest-laya:
-    <<: *rest-laya
-    profiles: [cpu]
+    container_name: rest-laya
     build:
       context: .
       args:
-        # CPU-only torch build: skips ~3GB of CUDA libraries.
-        TORCH_VARIANT: cpu
+        # torch build, as its suffix on PyTorch's wheel index: cpu, or the
+        # CUDA version matching the host driver (e.g. cu132). See the
+        # Dockerfile.
+        TORCH_VARIANT: ${TORCH_VARIANT:-cpu}
+    # nvidia hands the host's GPUs to the container. It's the runtime
+    # nvidia-container-toolkit registers with Docker (`docker info | grep
+    # -i runtimes` should list it); runc is Docker's default, no GPU.
+    runtime: ${DOCKER_RUNTIME:-runc}
+    ports:
+      - "8055:8055"
+    environment:
+      # Which GPUs the nvidia runtime exposes; ignored under runc.
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      # Comma-separated checkpoint names to preload. Valid values:
+      # english, multilingual, typed-decisions.
+      LAYA_MODELS: ${LAYA_MODELS:-english}
+      # Bearer token required on /predict and /v1/systemone, checked
+      # against the request's "Authorization: Bearer <token>" header.
+      # Leave empty (or unset entirely) to disable auth -- any request is
+      # then accepted with no Authorization header needed.
+      LAYA_API_TOKEN: ${LAYA_API_TOKEN:-}
+      # Turns jev API compatibility on/off. On by default. When on:
+      #   - the /v1/systemone endpoint responds (same as /predict); it's
+      #     a 404 when off.
+      #   - the `model` field also accepts any jev model id (jev-*, e.g.
+      #     jev-latest, jev-1.13.0), which resolves to the default
+      #     checkpoint (same as omitting `model`).
+      # Set to "false" to turn it off (an empty value keeps it on).
+      LAYA_JEV_COMPAT: ${LAYA_JEV_COMPAT:-true}
+      # How many predictions run at once; extra requests wait their turn.
+      # 1 on CPU: one forward pass already uses every core, so more in
+      # parallel just fight over them. On GPU, a few in flight keep the
+      # device busy while others do their CPU-side tokenizing.
+      LAYA_MAX_CONCURRENT_PREDICTIONS: ${LAYA_MAX_CONCURRENT_PREDICTIONS:-1}
+    volumes:
+      - hf-cache:/root/.cache/huggingface
 
     # Each checkpoint listed in LAYA_MODELS is a separate set of weights
-    # kept resident in memory (~800MB-1GB each). With just "english" the
-    # default Docker Desktop VM (~2GB) is enough; loading 2-3 checkpoints
-    # can OOM-kill the container (exit code 137). Uncomment and raise the
-    # limits below if LAYA_MODELS has more than one entry.
-    # deploy:
-    #   resources:
-    #     limits:
-    #       memory: 4g
-    #     reservations:
-    #       memory: 2g
-
-  # Needs the NVIDIA driver and nvidia-container-toolkit on the host.
-  rest-laya-cuda:
-    <<: *rest-laya
-    profiles: [cuda]
-    build:
-      context: .
-      args:
-        # CUDA 13.2 build, for a Jetson Orin on JetPack 7.2. Set
-        # TORCH_VARIANT in .env.cuda to match another host's CUDA (e.g. cu130).
-        TORCH_VARIANT: ${TORCH_VARIANT:-cu132}
-    environment:
-      <<: *environment
-      # On GPU, a few in flight keep the device busy while others do their
-      # CPU-side tokenizing.
-      LAYA_MAX_CONCURRENT_PREDICTIONS: ${LAYA_MAX_CONCURRENT_PREDICTIONS:-4}
-
-    # Hands one NVIDIA GPU to the container. `devices` must stay nested
-    # under deploy.resources.reservations: a service-level `devices:` key
-    # means something else (host device paths) and rejects this syntax.
-    #
-    # Memory: each checkpoint in LAYA_MODELS is loaded through host RAM
-    # (~800MB-1GB each) before moving to the GPU. Raise the limits if
-    # LAYA_MODELS has more than one entry, or the container can be
-    # OOM-killed (exit code 137).
+    # kept resident in memory (~800MB-1GB each; on GPU they're also loaded
+    # through host RAM first). Raise the limit if LAYA_MODELS has more
+    # than one entry, or the container can be OOM-killed (exit code 137).
     deploy:
       resources:
         limits:
-          memory: 4g
-        reservations:
-          memory: 2g
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+          memory: ${MEMORY_LIMIT:-4g}
+
+    healthcheck:
+      # python:3.11-slim ships without curl, so probe with the stdlib instead.
+      # urlopen raises on non-2xx, which makes the check fail.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8055/health', timeout=4)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
 volumes:
   hf-cache:
