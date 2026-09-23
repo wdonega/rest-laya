@@ -25,64 +25,69 @@ uvicorn app.main:app --host 0.0.0.0 --port 8055
 
 ## Running with Docker
 
-Two compose files, same service and settings:
-
-- `docker-compose.yml` runs the prebuilt image from GHCR (see below).
-- `docker-compose-dev.yml` builds the image from this checkout.
-
-Each build has a ready-made env file with the values that differ (torch
-build, Docker runtime, `LAYA_*`): `.env.cpu` and `.env.cuda`.
-
 ```bash
-# prebuilt image
-docker compose --env-file .env.cpu pull
-docker compose --env-file .env.cpu up -d
-
-# local build
-docker compose -f docker-compose-dev.yml --env-file .env.cpu up -d --build
+docker compose up -d
 ```
 
-The CPU build installs the `torch==…+cpu` wheel, which skips ~3GB of CUDA
-libraries. To change a setting (e.g. which checkpoints to preload), edit
-`LAYA_MODELS` and friends in the env file; `docker-compose.yml` explains
-each one. Don't commit a real `LAYA_API_TOKEN`: export it in the shell,
-which wins over the env file.
+That's it: it pulls the prebuilt CPU image (`ghcr.io/wdonega/rest-laya:cpu`,
+x86 and ARM) and serves on port 8055. The first start downloads the model
+weights into the `hf-cache` volume, so later starts are faster.
 
-### Prebuilt images
+Settings (which checkpoints to preload, auth token, ...) are the `LAYA_*`
+variables in `docker-compose.yml`, each with a comment. Override them in the
+shell or an env file instead of editing it, e.g.
+`LAYA_MODELS=english,multilingual docker compose up -d`. Don't commit a real
+`LAYA_API_TOKEN`.
 
-GitHub Actions (`.github/workflows/docker.yml`) builds both variants for
-x86 and ARM on every push to `main` and publishes them to GHCR as
-`ghcr.io/wdonega/rest-laya:cpu` and `:cu132`. Each commit is also tagged
-`<variant>-sha-<short sha>`, and each `v*` git tag as `<version>-<variant>`
-(e.g. `1.2.0-cu132`).
-
-## Running with CUDA
+### With CUDA
 
 Needs a Linux host with an NVIDIA GPU, its driver, and
 [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
 Docker Desktop on macOS can't pass a GPU through, so this doesn't apply there.
 
 ```bash
-docker compose --env-file .env.cuda pull
 docker compose --env-file .env.cuda up -d
 ```
 
-`.env.cuda` picks the CUDA image (`:cu132`), runs the container under the
-`nvidia` runtime (which hands it the GPU) and runs more predictions at once.
-nvidia-container-toolkit registers that runtime with Docker; check with
-`docker info | grep -i runtimes`, which should list `nvidia`.
+`.env.cuda` switches to the CUDA image (`:cu132`, CUDA 13.2, e.g. a Jetson
+Orin on JetPack 7.2), runs the container under the `nvidia` runtime (which
+hands it the GPU) and runs more predictions at once. nvidia-container-toolkit
+registers that runtime with Docker; `docker info | grep -i runtimes` should
+list `nvidia`.
 
-That image has CUDA 13.2 (e.g. a Jetson Orin on JetPack 7.2). For a host on
-another CUDA version, set `TORCH_VARIANT` in `.env.cuda` to the matching
-suffix from [PyTorch's wheel index](https://download.pytorch.org/whl/)
-(e.g. `cu130`, `cu126`) and build it locally with `docker-compose-dev.yml`:
-only `cpu` and `cu132` are prebuilt.
-
-> No app change is needed: laya picks `cuda` automatically when
+No app change is needed: laya picks `cuda` automatically when
 `torch.cuda.is_available()` is true. To confirm, run
 `docker exec rest-laya python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_arch_list())"`.
 It should print `True`, and the list should include your GPU's arch (e.g.
 `sm_87` on an Orin).
+
+Only `cpu` and `cu132` are prebuilt. For a host on another CUDA version,
+build your own image (below).
+
+## Building your own image
+
+`docker-compose-dev.yml` is the same service, but builds the image from this
+checkout (tagged `rest-laya:<variant>-dev`, so it never shadows the GHCR
+image). It takes the same env files:
+
+```bash
+docker compose -f docker-compose-dev.yml up -d --build                       # CPU
+docker compose -f docker-compose-dev.yml --env-file .env.cuda up -d --build  # CUDA
+```
+
+The torch build comes from `TORCH_VARIANT`: `cpu` (skips ~3GB of CUDA
+libraries), or the suffix from [PyTorch's wheel index](https://download.pytorch.org/whl/)
+matching the host's CUDA version, e.g. `cu126`, `cu130`, `cu132`. Set it in
+`.env.cuda`, or for a one-off:
+`TORCH_VARIANT=cu130 docker compose -f docker-compose-dev.yml --env-file .env.cuda up -d --build`.
+
+### Published images
+
+GitHub Actions (`.github/workflows/docker.yml`) builds `cpu` and `cu132` for
+x86 and ARM on every push to `main` and publishes them to GHCR as
+`ghcr.io/wdonega/rest-laya:cpu` and `:cu132`. Each commit is also tagged
+`<variant>-sha-<short sha>`, and each `v*` git tag `<version>-<variant>`
+(e.g. `1.2.0-cu132`).
 
 ## Trying it out
 
