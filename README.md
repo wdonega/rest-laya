@@ -9,9 +9,7 @@ It is also jev-compatible. It serves `POST /v1/systemone`, which is
 [jev](https://docs.typesafe.ai)'s own endpoint, with the same request and
 response shape, `Authorization: Bearer` auth, jev's error format
 (`{"detail": ...}`) and its `x-typesafe-request-id` header, plus
-`GET /v1/models`. The formats follow what jev's Java SDK
-([spring-ai-typesafe](https://github.com/spring-ai-community/spring-ai-typesafe))
-parses. To turn it off, see [jev compatibility](#jev-compatibility).
+`GET /v1/models`. To turn it off, see [jev compatibility](#jev-compatibility).
 
 # Contents
 
@@ -41,8 +39,7 @@ docker run -d --name rest-laya -p 8055:8055 \
 This pulls the prebuilt CPU image (x86 and ARM) and serves on port 8055. The
 first start downloads the model weights into the `rest-laya_hf-cache` volume,
 so later starts are faster; drop the `-v` and every new container downloads
-them again. To change what it runs (checkpoints, auth, ...), pass more `-e`
-variables; see [Configuration](#configuration).
+them again. To change what it runs (checkpoints, auth, ...), see [Configuration](#configuration).
 
 Or, from a clone of this repo, with Compose:
 
