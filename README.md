@@ -2,8 +2,6 @@
   <img src="logo.png" alt="rest-laya" width="480">
 </p>
 
-# rest-laya
-
 A simple Python service that exposes the Laya model ([convaiinnovations/laya](https://huggingface.co/convaiinnovations/laya)) over
 REST, for consumption by any language or framework that can make an HTTP
 request.
@@ -16,7 +14,23 @@ exact error JSON, so that envelope is modeled on their documented SDK error
 fields — test your client against it before relying on it. See
 [jev compatibility](#jev-compatibility) below to toggle it off.
 
-## Running with Docker
+# Contents
+
+- [Running with Docker](#running-with-docker)
+  - [With CUDA](#with-cuda)
+- [Trying it out](#trying-it-out)
+  - [Health](#health)
+  - [Predict](#predict)
+  - [Errors](#errors)
+- [Configuration](#configuration)
+  - [Auth](#auth)
+  - [jev compatibility](#jev-compatibility)
+- [Building your own image](#building-your-own-image)
+  - [Published images](#published-images)
+- [Running without Docker](#running-without-docker)
+- [Notes](#notes)
+
+# Running with Docker
 
 ```bash
 docker compose up -d
@@ -27,7 +41,7 @@ x86 and ARM) and serves on port 8055. The first start downloads the model
 weights into the `hf-cache` volume, so later starts are faster. To change
 what it runs (checkpoints, auth, ...), see [Configuration](#configuration).
 
-### With CUDA
+## With CUDA
 
 Needs a Linux host with an NVIDIA GPU, its driver, and
 [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
@@ -52,9 +66,9 @@ It should print `True`, and the list should include your GPU's arch (e.g.
 Only `cpu` and `cu132` are prebuilt. For a host on another CUDA version,
 [build your own image](#building-your-own-image).
 
-## Trying it out
+# Trying it out
 
-### Health
+## Health
 
 ```bash
 curl http://localhost:8055/health
@@ -68,7 +82,7 @@ Response:
 It returns `503` (not `200`) while the router isn't usable, so the container
 healthcheck fails.
 
-### Predict
+## Predict
 
 Available at both `/predict` and `/v1/systemone` (jev's own endpoint path) —
 same handler, same request/response shape, pick whichever path your client
@@ -183,7 +197,7 @@ Response:
 }
 ```
 
-### Errors
+## Errors
 
 All error bodies use jev's envelope, `{"error": {"message", "type", "field_path"}}`
 (`field_path` is only present for field-specific errors). Status/`type` pairs:
@@ -194,7 +208,7 @@ All error bodies use jev's envelope, `{"error": {"message", "type", "field_path"
 | 401    | `authentication_error`        | `LAYA_API_TOKEN` is set and the request's bearer token is missing/wrong |
 | 422    | `unprocessable_entity_error`  | malformed body, or the model rejects the request |
 
-## Configuration
+# Configuration
 
 All settings are environment variables, with defaults in
 `docker-compose.yml`. Override them in the shell or in an env file rather
@@ -216,7 +230,7 @@ shell wins over the env file.
 | `TORCH_VARIANT` | `cpu` (`cu132` in `.env.cuda`) | Which image to run (or build): the torch build, CPU or a CUDA version. |
 | `DOCKER_RUNTIME` | `runc` (`nvidia` in `.env.cuda`) | Docker runtime; `nvidia` hands the GPU to the container. |
 
-### Auth
+## Auth
 
 `/predict` and `/v1/systemone` check `Authorization: Bearer <token>` against
 `LAYA_API_TOKEN`. If that env var is empty or
@@ -226,7 +240,7 @@ With auth on, `/docs`, `/redoc` and `/openapi.json` are disabled, so the API
 schema isn't exposed to anonymous callers. `/health` stays open either way
 (the container healthcheck needs it).
 
-### jev compatibility
+## jev compatibility
 
 Controlled by `LAYA_JEV_COMPAT` — **on by default**.
 When on:
@@ -239,7 +253,7 @@ When on:
 
 Set `LAYA_JEV_COMPAT=false` to turn both off. An empty value keeps it on.
 
-## Building your own image
+# Building your own image
 
 `docker-compose-dev.yml` is the same service, but builds the image from this
 checkout (tagged `rest-laya:<variant>-dev`, so it never shadows the GHCR
@@ -256,15 +270,23 @@ matching the host's CUDA version, e.g. `cu126`, `cu130`, `cu132`. Set it in
 `.env.cuda`, or for a one-off:
 `TORCH_VARIANT=cu130 docker compose -f docker-compose-dev.yml --env-file .env.cuda up -d --build`.
 
-### Published images
+## Published images
 
 GitHub Actions (`.github/workflows/docker.yml`) builds `cpu` and `cu132` for
-x86 and ARM on every push to `main` and publishes them to GHCR as
-`ghcr.io/wdonega/rest-laya:cpu` and `:cu132`. Each commit is also tagged
-`<variant>-sha-<short sha>`, and each `v*` git tag `<version>-<variant>`
-(e.g. `1.2.0-cu132`).
+x86 and ARM on every push to `main` and publishes them to GHCR
+(`ghcr.io/wdonega/rest-laya`) with these tags:
 
-## Running without Docker
+| | CPU | CUDA |
+|---|---|---|
+| Newest build | `latest`, `latest-cpu`, `cpu` | `latest-cuda`, `cu132` |
+| Pinned build | `revN`, `revN-cpu` | `revN-cuda` |
+| Release (`v1.2.0` git tag) | `1.2.0-cpu` | `1.2.0-cuda` |
+
+`N` is the workflow run number, which goes up on every run; the Actions
+tab shows which commit each run built. The compose files use `cpu` and
+`cu132`, the value of `TORCH_VARIANT`.
+
+# Running without Docker
 
 ```bash
 pip install -r requirements.txt
@@ -273,7 +295,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8055
 
 The same `LAYA_*` variables apply; export them before starting.
 
-## Notes
+# Notes
 
 - `usage.output_tokens` is always `0`: Laya is a classifier, it scores the
   options in one forward pass and generates no tokens. `usage.input_tokens`

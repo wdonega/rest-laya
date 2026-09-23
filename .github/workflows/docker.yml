@@ -1,9 +1,10 @@
 # Builds the Docker image for each torch variant (cpu, cu132) on native
 # x86 and ARM runners, then merges both architectures into one multi-arch
 # tag per variant on GHCR:
-#   ghcr.io/wdonega/rest-laya:cpu     ghcr.io/wdonega/rest-laya:cu132
-# Pinned per commit as <variant>-sha-<short sha>, and per release tag
-# (v1.2.3) as 1.2.3-<variant>.
+#   cpu:   latest, latest-cpu, cpu, revN, revN-cpu
+#   cu132: latest-cuda, cu132, revN-cuda
+# on pushes to main, where N is the workflow run number (increments on
+# every run). A release tag v1.2.3 adds 1.2.3-cpu / 1.2.3-cuda.
 name: docker
 
 on:
@@ -85,7 +86,15 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        variant: [cpu, cu132]
+        include:
+          # alias: the variant's name in the friendly tags (latest-cuda, ...).
+          - variant: cpu
+            alias: cpu
+          - variant: cu132
+            alias: cuda
+    env:
+      ON_MAIN: ${{ github.ref_name == github.event.repository.default_branch }}
+      IS_CPU: ${{ matrix.variant == 'cpu' }}
     steps:
       - name: Prepare
         run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
@@ -112,9 +121,12 @@ jobs:
           # make them overwrite each other.
           flavor: latest=false
           tags: |
-            type=raw,value=${{ matrix.variant }},enable={{is_default_branch}}
-            type=sha,prefix=${{ matrix.variant }}-sha-
-            type=semver,pattern={{version}},suffix=-${{ matrix.variant }}
+            type=raw,value=latest,enable=${{ env.ON_MAIN == 'true' && env.IS_CPU == 'true' }}
+            type=raw,value=latest-${{ matrix.alias }},enable=${{ env.ON_MAIN }}
+            type=raw,value=${{ matrix.variant }},enable=${{ env.ON_MAIN }}
+            type=raw,value=rev${{ github.run_number }},enable=${{ env.ON_MAIN == 'true' && env.IS_CPU == 'true' }}
+            type=raw,value=rev${{ github.run_number }}-${{ matrix.alias }},enable=${{ env.ON_MAIN }}
+            type=semver,pattern={{version}},suffix=-${{ matrix.alias }}
 
       - name: Create multi-arch manifest
         working-directory: /tmp/digests
