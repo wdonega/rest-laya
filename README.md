@@ -32,13 +32,14 @@ file with the values that differ (torch build, Docker runtime, `LAYA_*`):
 docker compose --env-file .env.cpu up --build
 ```
 
+
 The CPU build installs the `torch==…+cpu` wheel, which skips ~3GB of CUDA
 libraries. To change a setting (e.g. which checkpoints to preload), edit
 `LAYA_MODELS` and friends in the env file; `docker-compose.yml` explains
 each one. Don't commit a real `LAYA_API_TOKEN`: export it in the shell,
 which wins over the env file.
 
-## Running with CUDA
+### Running with CUDA
 
 Needs a Linux host with an NVIDIA GPU, its driver, and
 [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
@@ -58,7 +59,7 @@ host on another CUDA version, set `TORCH_VARIANT` in `.env.cuda` to the matching
 suffix from [PyTorch's wheel index](https://download.pytorch.org/whl/)
 (e.g. `cu130`, `cu126`).
 
-No app change is needed: laya picks `cuda` automatically when
+> No app change is needed: laya picks `cuda` automatically when
 `torch.cuda.is_available()` is true. To confirm, run
 `docker exec rest-laya python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_arch_list())"`.
 It should print `True`, and the list should include your GPU's arch (e.g.
