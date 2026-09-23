@@ -1,80 +1,48 @@
-# Everything that differs between the CPU and CUDA builds is a variable,
-# set by a ready-made env file:
+# Pick a build with its env file (defaults below are the CPU build's):
 #   docker compose --env-file .env.cpu up -d --build
 #   docker compose --env-file .env.cuda up -d --build
-# The defaults below (after `:-`) are the CPU build's, so a plain
-# `docker compose up --build` also works.
 services:
   rest-laya:
     container_name: rest-laya
     build:
       context: .
       args:
-        # torch build, as its suffix on PyTorch's wheel index: cpu, or the
-        # CUDA version matching the host driver (e.g. cu132). See the
-        # Dockerfile.
+        # torch wheel variant: cpu, or the host's CUDA version (e.g. cu132).
         TORCH_VARIANT: ${TORCH_VARIANT:-cpu}
-    # --- NVIDIA ---------------------------------------------------------
-    # The GPU is handed over by the NVIDIA container runtime, picked here
-    # per env file: nvidia in .env.cuda, runc (Docker's default, no GPU)
-    # in .env.cpu. nvidia-container-toolkit registers the nvidia runtime
-    # with Docker; `docker info | grep -i runtimes` should list it, and if
-    # it doesn't: sudo nvidia-ctk runtime configure --runtime=docker &&
-    # sudo systemctl restart docker.
-    #
-    # This is used instead of the usual deploy.resources.reservations
-    # .devices block (driver: nvidia, capabilities: [gpu]) because that
-    # block can't be switched off by a variable: with it, the CPU build
-    # fails to start on hosts without the NVIDIA driver.
-    # The NVIDIA_* variables under `environment` configure this runtime.
+
+    # --- NVIDIA ---
+    # nvidia hands the GPU to the container; runc is Docker's default (no GPU).
+    # Needs nvidia-container-toolkit; check with `docker info | grep -i runtimes`.
+    # Used instead of deploy.resources.reservations.devices, which can't be
+    # turned off by a variable and breaks the CPU build on non-NVIDIA hosts.
     runtime: ${DOCKER_RUNTIME:-runc}
+
     ports:
       - "8055:8055"
     environment:
-      # NVIDIA runtime settings (ignored under runc): which GPUs it exposes,
-      # and which driver features -- compute is CUDA itself, utility adds
-      # nvidia-smi.
+      # NVIDIA runtime only: GPUs exposed and driver features (compute = CUDA).
       NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
       NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
-      # Comma-separated checkpoint names to preload. Valid values:
-      # english, multilingual, typed-decisions.
+      # Checkpoints to preload, comma-separated: english, multilingual, typed-decisions.
       LAYA_MODELS: ${LAYA_MODELS:-english}
-      # Bearer token required on /predict and /v1/systemone, checked
-      # against the request's "Authorization: Bearer <token>" header.
-      # Leave empty (or unset entirely) to disable auth -- any request is
-      # then accepted with no Authorization header needed.
+      # Bearer token for /predict and /v1/systemone. Empty disables auth.
       LAYA_API_TOKEN: ${LAYA_API_TOKEN:-}
-      # Turns jev API compatibility on/off. On by default. When on:
-      #   - the /v1/systemone endpoint responds (same as /predict); it's
-      #     a 404 when off.
-      #   - the `model` field also accepts any jev model id (jev-*, e.g.
-      #     jev-latest, jev-1.13.0), which resolves to the default
-      #     checkpoint (same as omitting `model`).
-      # Set to "false" to turn it off (an empty value keeps it on).
+      # jev compatibility: enables /v1/systemone and jev-* model ids.
       LAYA_JEV_COMPAT: ${LAYA_JEV_COMPAT:-true}
-      # How many predictions run at once; extra requests wait their turn.
-      # 1 on CPU: one forward pass already uses every core, so more in
-      # parallel just fight over them. On GPU, a few in flight keep the
-      # device busy while others do their CPU-side tokenizing.
+      # Predictions run at once: 1 on CPU, a few on GPU.
       LAYA_MAX_CONCURRENT_PREDICTIONS: ${LAYA_MAX_CONCURRENT_PREDICTIONS:-1}
     volumes:
       - hf-cache:/root/.cache/huggingface
 
-    # Memory limit, off by default. Each checkpoint in LAYA_MODELS is a
-    # separate set of weights kept resident in memory (~800MB-1GB each; on
-    # GPU they're also loaded through host RAM first), so budget ~1GB per
-    # entry plus ~1GB for the process. Without a limit the container can
-    # use all of the host's (or Docker Desktop VM's) memory; with one set
-    # too low it's OOM-killed (exit code 137). Uncomment to cap it, e.g.
-    # 4g for all 3 checkpoints.
+    # Optional memory cap: ~1GB per checkpoint in LAYA_MODELS + ~1GB.
+    # Too low and the container is OOM-killed (exit 137).
     # deploy:
     #   resources:
     #     limits:
     #       memory: 4g
 
     healthcheck:
-      # python:3.11-slim ships without curl, so probe with the stdlib instead.
-      # urlopen raises on non-2xx, which makes the check fail.
+      # The slim image has no curl, so probe with Python.
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8055/health', timeout=4)"]
       interval: 10s
       timeout: 5s
