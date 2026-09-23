@@ -60,6 +60,15 @@ Needs a Linux host with an NVIDIA GPU, its driver, and
 Docker Desktop on macOS can't pass a GPU through, so this doesn't apply there.
 
 ```bash
+docker run -d --name rest-laya --runtime nvidia -p 8055:8055 \
+  -e LAYA_MODELS=english -e LAYA_MAX_CONCURRENT_PREDICTIONS=4 \
+  -v rest-laya_hf-cache:/root/.cache/huggingface \
+  ghcr.io/wdonega/rest-laya:cu132
+```
+
+`--runtime nvidia` is what hands the GPU to the container. With Compose:
+
+```bash
 docker compose --env-file .env.cuda up -d
 ```
 

@@ -39,6 +39,13 @@ COPY app ./app/
 # ARG LAYA_MODELS=english
 # RUN python -c "import os; from laya import Router; Router().preload(names=os.environ['LAYA_MODELS'].split(','))"
 
+# Tells the NVIDIA container runtime (`--runtime nvidia`) which GPUs and
+# driver features to hand over; without them it exposes nothing and torch
+# reports "Found no NVIDIA driver". Same defaults as NVIDIA's CUDA images.
+# Ignored under Docker's default runtime, so harmless in the CPU build.
+ENV NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
 EXPOSE 8055
 
 # --workers 1: each uvicorn worker loads its own copy of the checkpoints
