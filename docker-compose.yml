@@ -4,6 +4,10 @@
 services:
   rest-laya:
     container_name: rest-laya
+    # Prebuilt by .github/workflows/docker.yml for x86 and ARM, so a host can
+    # `docker compose --env-file .env.cuda pull` instead of building.
+    # `up --build` builds locally and tags the result with this name.
+    image: ghcr.io/wdonega/rest-laya:${TORCH_VARIANT:-cpu}
     build:
       context: .
       args:

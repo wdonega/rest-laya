@@ -39,7 +39,21 @@ libraries. To change a setting (e.g. which checkpoints to preload), edit
 each one. Don't commit a real `LAYA_API_TOKEN`: export it in the shell,
 which wins over the env file.
 
-### Running with CUDA
+#### Prebuilt images
+
+GitHub Actions (`.github/workflows/docker.yml`) builds both variants for
+x86 and ARM on every push to `main` and publishes them to GHCR as
+`ghcr.io/wdonega/rest-laya:cpu` and `:cu132`. To run one without building:
+
+```bash
+docker compose --env-file .env.cuda pull
+docker compose --env-file .env.cuda up -d
+```
+
+Each commit is also tagged `<variant>-sha-<short sha>`, and each `v*` git
+tag as `<version>-<variant>` (e.g. `1.2.0-cu132`).
+
+## Running with CUDA
 
 Needs a Linux host with an NVIDIA GPU, its driver, and
 [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
