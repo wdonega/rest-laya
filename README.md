@@ -16,13 +16,6 @@ exact error JSON, so that envelope is modeled on their documented SDK error
 fields — test your client against it before relying on it. See
 [jev compatibility](#jev-compatibility) below to toggle it off.
 
-## Running locally
-
-```bash
-pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8055
-```
-
 ## Running with Docker
 
 ```bash
@@ -31,13 +24,8 @@ docker compose up -d
 
 That's it: it pulls the prebuilt CPU image (`ghcr.io/wdonega/rest-laya:cpu`,
 x86 and ARM) and serves on port 8055. The first start downloads the model
-weights into the `hf-cache` volume, so later starts are faster.
-
-Settings (which checkpoints to preload, auth token, ...) are the `LAYA_*`
-variables in `docker-compose.yml`, each with a comment. Override them in the
-shell or an env file instead of editing it, e.g.
-`LAYA_MODELS=english,multilingual docker compose up -d`. Don't commit a real
-`LAYA_API_TOKEN`.
+weights into the `hf-cache` volume, so later starts are faster. To change
+what it runs (checkpoints, auth, ...), see [Configuration](#configuration).
 
 ### With CUDA
 
@@ -62,32 +50,7 @@ It should print `True`, and the list should include your GPU's arch (e.g.
 `sm_87` on an Orin).
 
 Only `cpu` and `cu132` are prebuilt. For a host on another CUDA version,
-build your own image (below).
-
-## Building your own image
-
-`docker-compose-dev.yml` is the same service, but builds the image from this
-checkout (tagged `rest-laya:<variant>-dev`, so it never shadows the GHCR
-image). It takes the same env files:
-
-```bash
-docker compose -f docker-compose-dev.yml up -d --build                       # CPU
-docker compose -f docker-compose-dev.yml --env-file .env.cuda up -d --build  # CUDA
-```
-
-The torch build comes from `TORCH_VARIANT`: `cpu` (skips ~3GB of CUDA
-libraries), or the suffix from [PyTorch's wheel index](https://download.pytorch.org/whl/)
-matching the host's CUDA version, e.g. `cu126`, `cu130`, `cu132`. Set it in
-`.env.cuda`, or for a one-off:
-`TORCH_VARIANT=cu130 docker compose -f docker-compose-dev.yml --env-file .env.cuda up -d --build`.
-
-### Published images
-
-GitHub Actions (`.github/workflows/docker.yml`) builds `cpu` and `cu132` for
-x86 and ARM on every push to `main` and publishes them to GHCR as
-`ghcr.io/wdonega/rest-laya:cpu` and `:cu132`. Each commit is also tagged
-`<variant>-sha-<short sha>`, and each `v*` git tag `<version>-<variant>`
-(e.g. `1.2.0-cu132`).
+[build your own image](#building-your-own-image).
 
 ## Trying it out
 
@@ -97,10 +60,13 @@ x86 and ARM on every push to `main` and publishes them to GHCR as
 curl http://localhost:8055/health
 ```
 
-Response: 
+Response:
 ```json
 {"status": "ok", "router_loaded": true, "models_loaded": ["laya/english"]}
 ```
+
+It returns `503` (not `200`) while the router isn't usable, so the container
+healthcheck fails.
 
 ### Predict
 
@@ -228,10 +194,32 @@ All error bodies use jev's envelope, `{"error": {"message", "type", "field_path"
 | 401    | `authentication_error`        | `LAYA_API_TOKEN` is set and the request's bearer token is missing/wrong |
 | 422    | `unprocessable_entity_error`  | malformed body, or the model rejects the request |
 
+## Configuration
+
+All settings are environment variables, with defaults in
+`docker-compose.yml`. Override them in the shell or in an env file rather
+than editing that file:
+
+```bash
+LAYA_MODELS=english,multilingual docker compose up -d
+```
+
+`.env.cpu` and `.env.cuda` are ready-made env files for each build. The
+shell wins over the env file.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `LAYA_MODELS` | `english` | Checkpoints to preload, comma-separated: `english`, `multilingual`, `typed-decisions`. The first one is the default when a request omits `model`. Each adds ~1GB of memory. |
+| `LAYA_API_TOKEN` | empty | Bearer token for `/predict` and `/v1/systemone`; empty disables auth. See [Auth](#auth). Don't commit a real one. |
+| `LAYA_JEV_COMPAT` | `true` | jev compatibility. See [jev compatibility](#jev-compatibility). |
+| `LAYA_MAX_CONCURRENT_PREDICTIONS` | `1` (`4` in `.env.cuda`) | Predictions run at once; extra requests queue. 1 is fastest on CPU, where one forward pass already uses every core; raise it on GPU. |
+| `TORCH_VARIANT` | `cpu` (`cu132` in `.env.cuda`) | Which image to run (or build): the torch build, CPU or a CUDA version. |
+| `DOCKER_RUNTIME` | `runc` (`nvidia` in `.env.cuda`) | Docker runtime; `nvidia` hands the GPU to the container. |
+
 ### Auth
 
 `/predict` and `/v1/systemone` check `Authorization: Bearer <token>` against
-`LAYA_API_TOKEN` (see `docker-compose.yml`). If that env var is empty or
+`LAYA_API_TOKEN`. If that env var is empty or
 unset, auth is off and no header is required at all.
 
 With auth on, `/docs`, `/redoc` and `/openapi.json` are disabled, so the API
@@ -240,7 +228,7 @@ schema isn't exposed to anonymous callers. `/health` stays open either way
 
 ### jev compatibility
 
-Controlled by `LAYA_JEV_COMPAT` (see `docker-compose.yml`) — **on by default**.
+Controlled by `LAYA_JEV_COMPAT` — **on by default**.
 When on:
 
 - `/v1/systemone` responds (same handler as `/predict`). It's a `404` when off.
@@ -251,26 +239,47 @@ When on:
 
 Set `LAYA_JEV_COMPAT=false` to turn both off. An empty value keeps it on.
 
+## Building your own image
+
+`docker-compose-dev.yml` is the same service, but builds the image from this
+checkout (tagged `rest-laya:<variant>-dev`, so it never shadows the GHCR
+image). It takes the same env files:
+
+```bash
+docker compose -f docker-compose-dev.yml up -d --build                       # CPU
+docker compose -f docker-compose-dev.yml --env-file .env.cuda up -d --build  # CUDA
+```
+
+The torch build comes from `TORCH_VARIANT`: `cpu` (skips ~3GB of CUDA
+libraries), or the suffix from [PyTorch's wheel index](https://download.pytorch.org/whl/)
+matching the host's CUDA version, e.g. `cu126`, `cu130`, `cu132`. Set it in
+`.env.cuda`, or for a one-off:
+`TORCH_VARIANT=cu130 docker compose -f docker-compose-dev.yml --env-file .env.cuda up -d --build`.
+
+### Published images
+
+GitHub Actions (`.github/workflows/docker.yml`) builds `cpu` and `cu132` for
+x86 and ARM on every push to `main` and publishes them to GHCR as
+`ghcr.io/wdonega/rest-laya:cpu` and `:cu132`. Each commit is also tagged
+`<variant>-sha-<short sha>`, and each `v*` git tag `<version>-<variant>`
+(e.g. `1.2.0-cu132`).
+
+## Running without Docker
+
+```bash
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8055
+```
+
+The same `LAYA_*` variables apply; export them before starting.
+
 ## Notes
 
-- Which checkpoints get preloaded at startup is controlled by the
-  `LAYA_MODELS` env var (comma-separated, e.g. `english` or
-  `english,multilingual`) — see `docker-compose.yml`. Defaults to
-  `english` only. Each checkpoint adds to memory usage, so only enable
-  the ones you actually need.
-- If a `/predict` or `/v1/systemone` request omits `model`, the sidecar uses
-  the first checkpoint in `LAYA_MODELS` as the default — it does not
-  hardcode `english`.
-- `/health` returns `503` (not `200`) when the router isn't usable, so the
-  container healthcheck fails.
 - `usage.output_tokens` is always `0`: Laya is a classifier, it scores the
   options in one forward pass and generates no tokens. `usage.input_tokens`
   counts every token the model read, and each question is encoded together
   with the full `state`, so `state` is counted once **per question**
   (3 questions over a 50-token `state` ≈ 150+ tokens).
-- Predictions run one at a time by default (`LAYA_MAX_CONCURRENT_PREDICTIONS=1`
-  in `docker-compose.yml`); extra requests queue. On CPU that's faster
-  overall than running them in parallel. Raise it on GPU.
 - The model weights are cached in the `hf-cache` Docker volume, so restarts
   don't re-download them. To force a fresh download (e.g. after changing
   checkpoints), run `docker compose down && docker volume rm rest-laya_hf-cache`.
