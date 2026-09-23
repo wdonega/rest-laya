@@ -2,17 +2,16 @@
   <img src="logo.png" alt="rest-laya" width="480">
 </p>
 
-A simple Python service that exposes the Laya model ([convaiinnovations/laya](https://huggingface.co/convaiinnovations/laya)) over
-REST, for consumption by any language or framework that can make an HTTP
-request.
+A small Python service that serves the Laya model ([convaiinnovations/laya](https://huggingface.co/convaiinnovations/laya)) over
+REST, so any language or framework that can make an HTTP request can use it.
 
-**Designed to be jev-compatible**: also serves `POST /v1/systemone` —
-[jev](https://docs.typesafe.ai)'s own endpoint — with the same request/response
-shape, `Authorization: Bearer` auth, and a jev-style error envelope
+It is also jev-compatible. It serves `POST /v1/systemone`, which is
+[jev](https://docs.typesafe.ai)'s own endpoint, with the same request and
+response shape, `Authorization: Bearer` auth, and a jev-style error envelope
 (`{"error": {"message", "type", "field_path"}}`). jev's docs don't publish the
-exact error JSON, so that envelope is modeled on their documented SDK error
-fields — test your client against it before relying on it. See
-[jev compatibility](#jev-compatibility) below to toggle it off.
+exact error JSON, so the envelope follows the error fields in their SDK docs.
+Test your client against it before relying on it. To turn it off, see
+[jev compatibility](#jev-compatibility).
 
 # Contents
 
@@ -36,7 +35,7 @@ fields — test your client against it before relying on it. See
 docker compose up -d
 ```
 
-That's it: it pulls the prebuilt CPU image (`ghcr.io/wdonega/rest-laya:cpu`,
+This pulls the prebuilt CPU image (`ghcr.io/wdonega/rest-laya:cpu`,
 x86 and ARM) and serves on port 8055. The first start downloads the model
 weights into the `hf-cache` volume, so later starts are faster. To change
 what it runs (checkpoints, auth, ...), see [Configuration](#configuration).
@@ -57,7 +56,7 @@ hands it the GPU) and runs more predictions at once. nvidia-container-toolkit
 registers that runtime with Docker; `docker info | grep -i runtimes` should
 list `nvidia`.
 
-No app change is needed: laya picks `cuda` automatically when
+The app needs no change, since laya uses `cuda` whenever
 `torch.cuda.is_available()` is true. To confirm, run
 `docker exec rest-laya python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_arch_list())"`.
 It should print `True`, and the list should include your GPU's arch (e.g.
@@ -84,8 +83,8 @@ healthcheck fails.
 
 ## Predict
 
-Available at both `/predict` and `/v1/systemone` (jev's own endpoint path) —
-same handler, same request/response shape, pick whichever path your client
+`/predict` and `/v1/systemone` (jev's endpoint path) run the same handler
+with the same request and response shape. Use whichever path your client
 expects.
 
 ```bash
@@ -125,9 +124,9 @@ curl -X POST http://localhost:8055/predict \
 
 Checkpoint selection is the request body's `model` field:
 
-- `"model": "english"` or `"model": "laya/english"` — the `laya/` prefix
-  is optional, both forms work. Omit the field to use the first
-  checkpoint in `LAYA_MODELS` (the configured default).
+- `"model": "english"` and `"model": "laya/english"` both work, since the
+  `laya/` prefix is optional. Omit the field to use the first checkpoint in
+  `LAYA_MODELS`, which is the configured default.
 - An unknown value (not english/multilingual/typed-decisions, with or
   without the prefix) returns `422` with a JSON body.
 - A known value that this instance didn't preload (not in `LAYA_MODELS`)
@@ -233,31 +232,30 @@ shell wins over the env file.
 ## Auth
 
 `/predict` and `/v1/systemone` check `Authorization: Bearer <token>` against
-`LAYA_API_TOKEN`. If that env var is empty or
-unset, auth is off and no header is required at all.
+`LAYA_API_TOKEN`. If that variable is empty or unset, auth is off and no
+header is required.
 
-With auth on, `/docs`, `/redoc` and `/openapi.json` are disabled, so the API
-schema isn't exposed to anonymous callers. `/health` stays open either way
-(the container healthcheck needs it).
+With auth on, `/docs`, `/redoc` and `/openapi.json` are disabled, so
+anonymous callers can't read the API schema. `/health` stays open either
+way, because the container healthcheck needs it.
 
 ## jev compatibility
 
-Controlled by `LAYA_JEV_COMPAT` — **on by default**.
-When on:
+`LAYA_JEV_COMPAT` controls this, and it is on by default. When on:
 
 - `/v1/systemone` responds (same handler as `/predict`). It's a `404` when off.
-- `model` also accepts any jev model id — anything starting with `jev-`,
-  e.g. `jev-latest`, `jev-1.13.0` — which resolves to the default
-  checkpoint (same as omitting `model`; Laya has no per-checkpoint
-  equivalent of jev's versioned model ids).
+- `model` also accepts any jev model id (anything starting with `jev-`,
+  e.g. `jev-latest`, `jev-1.13.0`). It resolves to the default checkpoint,
+  the same as omitting `model`, because Laya has nothing like jev's
+  versioned model ids.
 
 Set `LAYA_JEV_COMPAT=false` to turn both off. An empty value keeps it on.
 
 # Building your own image
 
-`docker-compose-dev.yml` is the same service, but builds the image from this
-checkout (tagged `rest-laya:<variant>-dev`, so it never shadows the GHCR
-image). It takes the same env files:
+`docker-compose-dev.yml` runs the same service with an image built from this
+checkout. It tags the build `rest-laya:<variant>-dev` so it never shadows the
+GHCR image, and it takes the same env files:
 
 ```bash
 docker compose -f docker-compose-dev.yml up -d --build                       # CPU
@@ -297,14 +295,14 @@ The same `LAYA_*` variables apply; export them before starting.
 
 # Notes
 
-- `usage.output_tokens` is always `0`: Laya is a classifier, it scores the
+- `usage.output_tokens` is always `0`. Laya is a classifier that scores the
   options in one forward pass and generates no tokens. `usage.input_tokens`
-  counts every token the model read, and each question is encoded together
-  with the full `state`, so `state` is counted once **per question**
-  (3 questions over a 50-token `state` ≈ 150+ tokens).
+  counts every token the model read. Each question is encoded together with
+  the full `state`, so `state` is counted once per question (3 questions over
+  a 50-token `state` come to 150+ tokens).
 - The model weights are cached in the `hf-cache` Docker volume, so restarts
   don't re-download them. To force a fresh download (e.g. after changing
   checkpoints), run `docker compose down && docker volume rm rest-laya_hf-cache`.
 - Per-request latency after preloading: ~32ms (GPU) / 193-464ms (CPU).
-- Recalibrating `temperature_by_options` should happen offline, as a
-  separate script that overwrites the Router config — not on every request.
+- Recalibrate `temperature_by_options` offline, in a separate script that
+  overwrites the Router config, and not on every request.
