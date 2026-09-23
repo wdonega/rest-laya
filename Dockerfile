@@ -32,7 +32,7 @@ COPY app ./app/
 # Optional: download the weights at build time, so the first start in
 # production doesn't pay for the download. Uncomment to enable. Pass the
 # same checkpoint list you set in LAYA_MODELS, e.g.
-#   docker compose build --build-arg LAYA_MODELS=english,multilingual
+#   docker compose -f docker-compose-dev.yml build --build-arg LAYA_MODELS=english,multilingual
 # Caveat: docker-compose.yml mounts the hf-cache volume over the cache
 # directory, and an existing volume hides whatever the image baked in.
 # After changing the weights, drop it: docker volume rm rest-laya_hf-cache

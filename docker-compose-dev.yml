@@ -1,0 +1,18 @@
+# Builds the image from this checkout instead of pulling it. Everything
+# else comes from docker-compose.yml.
+#   docker compose -f docker-compose-dev.yml --env-file .env.cuda up -d --build
+services:
+  rest-laya:
+    extends:
+      file: docker-compose.yml
+      service: rest-laya
+    # Local name, so a dev build never shadows the GHCR image.
+    image: rest-laya:${TORCH_VARIANT:-cpu}-dev
+    build:
+      context: .
+      args:
+        # torch wheel variant: cpu, or the host's CUDA version (e.g. cu132).
+        TORCH_VARIANT: ${TORCH_VARIANT:-cpu}
+
+volumes:
+  hf-cache:

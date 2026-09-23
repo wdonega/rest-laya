@@ -1,18 +1,14 @@
-# Pick a build with its env file (defaults below are the CPU build's):
-#   docker compose --env-file .env.cpu up -d --build
-#   docker compose --env-file .env.cuda up -d --build
+# Runs the prebuilt image from GHCR. Pick a build with its env file
+# (defaults below are the CPU build's):
+#   docker compose --env-file .env.cuda pull
+#   docker compose --env-file .env.cuda up -d
+# To build the image locally instead, use docker-compose-dev.yml.
 services:
   rest-laya:
     container_name: rest-laya
-    # Prebuilt by .github/workflows/docker.yml for x86 and ARM, so a host can
-    # `docker compose --env-file .env.cuda pull` instead of building.
-    # `up --build` builds locally and tags the result with this name.
+    # Built by .github/workflows/docker.yml for x86 and ARM, one tag per
+    # torch variant: cpu, or the host's CUDA version (e.g. cu132).
     image: ghcr.io/wdonega/rest-laya:${TORCH_VARIANT:-cpu}
-    build:
-      context: .
-      args:
-        # torch wheel variant: cpu, or the host's CUDA version (e.g. cu132).
-        TORCH_VARIANT: ${TORCH_VARIANT:-cpu}
 
     # --- NVIDIA ---
     # nvidia hands the GPU to the container; runc is Docker's default (no GPU).
