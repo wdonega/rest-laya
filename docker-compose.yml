@@ -1,15 +1,16 @@
-# One service per build, each behind a Compose profile. Pick one:
-#   docker compose --profile cpu up -d --build
-#   docker compose --profile cuda up -d --build
-# or once per host, in .env (see .env.example): COMPOSE_PROFILES=cuda
+# One service per build, each behind a Compose profile (cpu, cuda). Pick
+# one with its ready-made env file, which sets the profile and the values
+# below:
+#   docker compose --env-file .env.cpu up -d --build
+#   docker compose --env-file .env.cuda up -d --build
 # Both use the container name rest-laya, so run only one at a time.
 
 # Settings shared by both services. `<<:` merges are shallow: a service
 # that sets `environment` or `build` replaces the whole key, which is why
 # the environment has its own anchor to merge from.
 #
-# Each value below is a default: set the same variable in .env (or the
-# shell) to override it on that host, no edit to this file needed.
+# Each value below is a default, used when the env file (or the shell)
+# doesn't set that variable.
 x-environment: &environment
   # Comma-separated checkpoint names to preload. Valid values:
   # english, multilingual, typed-decisions.
@@ -78,7 +79,7 @@ services:
       context: .
       args:
         # CUDA 13.2 build, for a Jetson Orin on JetPack 7.2. Set
-        # TORCH_VARIANT in .env to match another host's CUDA (e.g. cu130).
+        # TORCH_VARIANT in .env.cuda to match another host's CUDA (e.g. cu130).
         TORCH_VARIANT: ${TORCH_VARIANT:-cu132}
     environment:
       <<: *environment

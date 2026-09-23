@@ -25,22 +25,19 @@ uvicorn app.main:app --host 0.0.0.0 --port 8055
 
 ## Running with Docker
 
-`docker-compose.yml` has one service per torch build, each behind a
-[Compose profile](https://docs.docker.com/compose/how-tos/profiles/):
-`cpu` and `cuda`. Pick one per run:
+Each build has a ready-made env file, which picks the service (through a
+[Compose profile](https://docs.docker.com/compose/how-tos/profiles/)) and
+sets the `LAYA_*` values:
 
 ```bash
-docker compose --profile cpu up --build
+docker compose --env-file .env.cpu up --build
 ```
 
-The `cpu` build installs the `torch==…+cpu` wheel, which skips ~3GB of CUDA
-libraries.
-
-To set a host up once instead, `cp .env.example .env` and edit it:
-`COMPOSE_PROFILES` picks the profile, and the `LAYA_*` variables override the
-defaults in `docker-compose.yml` (e.g. which checkpoints to preload). Plain
-`docker compose up -d --build` then uses it. Without a profile, from either
-place, Compose has no service to start.
+The CPU build installs the `torch==…+cpu` wheel, which skips ~3GB of CUDA
+libraries. To change a setting (e.g. which checkpoints to preload), edit
+`LAYA_MODELS` and friends in the env file; `docker-compose.yml` explains
+each one. Don't commit a real `LAYA_API_TOKEN`: export it in the shell,
+which wins over the env file.
 
 ## Running with CUDA
 
@@ -49,14 +46,14 @@ Needs a Linux host with an NVIDIA GPU, its driver, and
 Docker Desktop on macOS can't pass a GPU through, so this doesn't apply there.
 
 ```bash
-docker compose --profile cuda up -d --build
+docker compose --env-file .env.cuda up -d --build
 ```
 
-(or `COMPOSE_PROFILES=cuda` in `.env`). The `cuda` service installs the CUDA
-torch build, reserves the GPU and runs more predictions at once.
+The `cuda` service installs the CUDA torch build, reserves the GPU and runs
+more predictions at once.
 
 It installs `cu132` (CUDA 13.2, e.g. a Jetson Orin on JetPack 7.2). For a
-host on another CUDA version, set `TORCH_VARIANT` in `.env` to the matching
+host on another CUDA version, set `TORCH_VARIANT` in `.env.cuda` to the matching
 suffix from [PyTorch's wheel index](https://download.pytorch.org/whl/)
 (e.g. `cu130`, `cu126`).
 
