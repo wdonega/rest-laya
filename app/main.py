@@ -1,10 +1,12 @@
 import hmac
 import logging
 import threading
+import uuid
 from contextlib import asynccontextmanager
 from typing import Annotated, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
@@ -19,6 +21,8 @@ from app.config import (
 )
 from app.models import (
     ErrorResponse,
+    ListModelsResponse,
+    ModelMetadata,
     PredictRequest,
     PredictResponse,
     HealthResponse,
@@ -55,7 +59,7 @@ app = FastAPI(
     openapi_url="/openapi.json" if _docs_enabled else None,
 )
 
-# HTTP status -> jev exception-class name, used as the error envelope's "type".
+# HTTP status -> jev exception-class name, used as the error envelope's "error_type".
 _ERROR_TYPES = {
     400: "invalid_request_error",
     401: "authentication_error",
@@ -71,34 +75,49 @@ _prediction_slots = threading.BoundedSemaphore(max_concurrent_predictions())
 _ERROR_RESPONSES = {status: {"model": ErrorResponse} for status in (400, 401, 422, 500)}
 
 
+# Sent on every response. jev's SDKs read it into the response's and the
+# exception's requestId(); it's also logged with unhandled errors, so a
+# client report can be matched to the server log.
+REQUEST_ID_HEADER = "x-typesafe-request-id"
+
+
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    request.state.request_id = uuid.uuid4().hex
+    response = await call_next(request)
+    response.headers[REQUEST_ID_HEADER] = request.state.request_id
+    return response
+
+
 def _error_body(status_code: int, message: str, field_path: str | None = None) -> dict:
     error_type = _ERROR_TYPES.get(status_code, "internal_server_error" if status_code >= 500 else "api_error")
-    body = {"message": message, "type": error_type}
+    detail = {"error_type": error_type, "message": message}
     if field_path is not None:
-        body["field_path"] = field_path
-    return {"error": body}
+        detail["field_path"] = field_path
+    return {"detail": detail}
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     # Covers, among other things, an invalid `model` value in the request
-    # body. jev's docs describe `field_path` as "a dotted path to the
-    # offending field" -- pydantic's error `loc` is exactly that, minus the
-    # leading "body".
-    first = exc.errors()[0]
-    if first["type"] == "json_invalid":
-        # loc here is ("body", <char offset>) -- not a field, so no field_path.
-        field_path = None
-    else:
-        field_path = ".".join(str(p) for p in first["loc"] if p != "body") or None
-    # pydantic prefixes messages from our own validators with "Value error, ".
-    message = first["msg"].removeprefix("Value error, ")
-    return JSONResponse(status_code=422, content=_error_body(422, message, field_path))
+    # body. Same list FastAPI returns by default (which jev returns too),
+    # trimmed to the fields jev's SDKs read, and without the "Value error, "
+    # prefix pydantic puts on messages from our own validators.
+    errors = [
+        {
+            "type": error["type"],
+            "loc": list(error["loc"]),
+            "msg": error["msg"].removeprefix("Value error, "),
+            "input": error.get("input"),
+        }
+        for error in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content=jsonable_encoder({"detail": errors}))
 
 
 # Registered on Starlette's base class, not FastAPI's subclass: routing
 # errors (404 unknown path, 405 wrong method) raise the base class, and
-# they'd otherwise skip the envelope and come back as {"detail": ...}.
+# they'd otherwise come back as a bare {"detail": "Not Found"}.
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
     # `detail` is either a plain message or {"message": ..., "field_path": ...}
@@ -117,8 +136,15 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     # Last resort, so even unexpected failures keep the JSON error envelope
     # instead of Starlette's plain-text "Internal Server Error".
-    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
-    return JSONResponse(status_code=500, content=_error_body(500, "internal server error"))
+    # This handler runs outside the request-id middleware, so it sets the
+    # header itself.
+    request_id = getattr(request.state, "request_id", None) or uuid.uuid4().hex
+    logger.exception("Unhandled error on %s %s (request id %s)", request.method, request.url.path, request_id)
+    return JSONResponse(
+        status_code=500,
+        content=_error_body(500, "internal server error"),
+        headers={REQUEST_ID_HEADER: request_id},
+    )
 
 
 def require_auth(authorization: Annotated[Optional[str], Header()] = None) -> None:
@@ -198,9 +224,49 @@ def predict(req: PredictRequest) -> PredictResponse:
     )
 
 
-# /v1/systemone (jev's own endpoint path) only exists when jev compat is
-# on -- same handler as /predict, registered as a second route. When
-# compat is off, that path 404s like any other unknown route.
+# Date of the first commit to convaiinnovations/laya on Hugging Face, as an
+# ISO-8601 timestamp with offset (the format jev returns and its SDKs
+# document). Laya ships no per-checkpoint release date, so every /v1/models
+# entry reports this one.
+_RELEASE_DATE = "2026-09-18T05:13:12+00:00"
+
+# Checkpoint -> the Hugging Face repo it comes from, for /v1/models.
+_MODEL_SOURCES = {
+    "english": "convaiinnovations/laya",
+    "multilingual": "convaiinnovations/laya, multilingual",
+    "typed-decisions": "convaiinnovations/laya, typed-decisions",
+}
+
+
+def list_models() -> ListModelsResponse:
+    """The checkpoints this instance preloaded, default first, plus jev-latest.
+
+    Names are the "laya/..." form the predict response reports, and each is
+    accepted as `model`. jev-latest is listed because jev clients default to
+    it; here it resolves to the default checkpoint.
+    """
+    names = configured_models()
+    models = [
+        ModelMetadata(
+            name=to_response_model_name(name),
+            description=f"Laya {name} checkpoint ({_MODEL_SOURCES[name]})",
+            release_date=_RELEASE_DATE,
+        )
+        for name in names
+    ]
+    models.append(
+        ModelMetadata(
+            name="jev-latest",
+            description=f"jev compatibility alias for the default checkpoint, {to_response_model_name(names[0])}",
+            release_date=_RELEASE_DATE,
+        )
+    )
+    return ListModelsResponse(models=models)
+
+
+# jev's own endpoint paths only exist when jev compat is on: /v1/systemone
+# (same handler as /predict, registered as a second route) and /v1/models.
+# When compat is off, both 404 like any other unknown route.
 if jev_compat_enabled():
     app.add_api_route(
         "/v1/systemone",
@@ -208,5 +274,13 @@ if jev_compat_enabled():
         methods=["POST"],
         response_model=PredictResponse,
         responses=_ERROR_RESPONSES,
+        dependencies=[Depends(require_auth)],
+    )
+    app.add_api_route(
+        "/v1/models",
+        list_models,
+        methods=["GET"],
+        response_model=ListModelsResponse,
+        responses={401: {"model": ErrorResponse}},
         dependencies=[Depends(require_auth)],
     )

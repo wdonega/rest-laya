@@ -94,21 +94,45 @@ class PredictResponse(BaseModel):
     usage: Usage
 
 
+# /v1/models, in the shape jev's SDKs read: {"models": [{"name", "description",
+# "release_date"}]}.
+class ModelMetadata(BaseModel):
+    name: str
+    description: Optional[str] = None
+    release_date: Optional[str] = None
+
+
+class ListModelsResponse(BaseModel):
+    models: list[ModelMetadata]
+
+
 class HealthResponse(BaseModel):
     status: str
     router_loaded: bool
     models_loaded: list[ResponseModelName] = Field(default_factory=list)
 
 
-# jev-style error envelope: {"error": {"message": ..., "type": ..., "field_path": ...}}.
-# `type` mirrors jev's exception-class naming (invalid_request_error,
-# unprocessable_entity_error, ...); `field_path` is the dotted path to the
-# offending field and is omitted when the error isn't field-specific.
+# jev's error envelope, as its SDKs parse it. Two shapes under "detail":
+#   {"detail": {"error_type": ..., "message": ..., "field_path": ...}}
+#     for errors the service raises. `error_type` mirrors jev's exception
+#     naming (invalid_request_error, authentication_error, ...);
+#     `field_path` is our addition, the dotted path to the offending field,
+#     omitted when the error isn't field-specific. Clients ignore it.
+#   {"detail": [{"type": ..., "loc": [...], "msg": ..., "input": ...}]}
+#     for request-body validation errors (FastAPI's own format, which jev
+#     returns too).
 class ErrorDetail(BaseModel):
+    error_type: str
     message: str
-    type: str
     field_path: Optional[str] = None
 
 
+class ValidationErrorItem(BaseModel):
+    type: str
+    loc: list[str | int]
+    msg: str
+    input: Any = None
+
+
 class ErrorResponse(BaseModel):
-    error: ErrorDetail
+    detail: ErrorDetail | list[ValidationErrorItem]

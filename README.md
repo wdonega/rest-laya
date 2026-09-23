@@ -7,11 +7,11 @@ REST, so any language or framework that can make an HTTP request can use it.
 
 It is also jev-compatible. It serves `POST /v1/systemone`, which is
 [jev](https://docs.typesafe.ai)'s own endpoint, with the same request and
-response shape, `Authorization: Bearer` auth, and a jev-style error envelope
-(`{"error": {"message", "type", "field_path"}}`). jev's docs don't publish the
-exact error JSON, so the envelope follows the error fields in their SDK docs.
-Test your client against it before relying on it. To turn it off, see
-[jev compatibility](#jev-compatibility).
+response shape, `Authorization: Bearer` auth, jev's error format
+(`{"detail": ...}`) and its `x-typesafe-request-id` header, plus
+`GET /v1/models`. The formats follow what jev's Java SDK
+([spring-ai-typesafe](https://github.com/spring-ai-community/spring-ai-typesafe))
+parses. To turn it off, see [jev compatibility](#jev-compatibility).
 
 # Contents
 
@@ -155,9 +155,9 @@ Checkpoint selection is the request body's `model` field:
   returns `400` with a JSON body, e.g.:
   ```json
   {
-    "error": {
+    "detail": {
+      "error_type": "invalid_request_error",
       "message": "model 'multilingual' is not configured on this instance; available models: ['english']",
-      "type": "invalid_request_error",
       "field_path": "model"
     }
   }
@@ -220,14 +220,31 @@ Response:
 
 ## Errors
 
-All error bodies use jev's envelope, `{"error": {"message", "type", "field_path"}}`
-(`field_path` is only present for field-specific errors). Status/`type` pairs:
+Error bodies use jev's format, with one of two shapes under `detail`.
+Request-body validation errors (missing field, invalid `model`, malformed
+JSON) are a list, FastAPI's default format:
 
-| Status | `type`                        | When |
+```json
+{"detail": [{"type": "missing", "loc": ["body", "questions"], "msg": "Field required", "input": {"state": "hi"}}]}
+```
+
+Every other error is an object. `field_path` is only present for
+field-specific errors:
+
+```json
+{"detail": {"error_type": "authentication_error", "message": "missing or invalid bearer token"}}
+```
+
+| Status | `error_type`                  | When |
 |--------|-------------------------------|------|
 | 400    | `invalid_request_error`       | e.g. `model` valid but not preloaded |
 | 401    | `authentication_error`        | `LAYA_API_TOKEN` is set and the request's bearer token is missing/wrong |
-| 422    | `unprocessable_entity_error`  | malformed body, or the model rejects the request |
+| 422    | `unprocessable_entity_error`  | the model rejects the request (validation errors use the list shape) |
+| 500    | `internal_server_error`       | unexpected failure; the log line carries the request id |
+
+Every response, errors included, carries an `x-typesafe-request-id` header,
+which jev's SDKs expose as `requestId()`. The server logs it with unhandled
+errors, so a client report can be matched to the log.
 
 # Configuration
 
@@ -275,12 +292,21 @@ way, because the container healthcheck needs it.
 `LAYA_JEV_COMPAT` controls this, and it is on by default. When on:
 
 - `/v1/systemone` responds (same handler as `/predict`). It's a `404` when off.
+- `GET /v1/models` lists the preloaded checkpoints, default first, plus
+  `jev-latest` (an alias for the default), in the shape jev's SDKs read. It
+  takes the same bearer token and is a `404` when off:
+  ```json
+  {"models": [
+    {"name": "laya/english", "description": "Laya english checkpoint (convaiinnovations/laya)", "release_date": "2026-09-18T05:13:12+00:00"},
+    {"name": "jev-latest", "description": "jev compatibility alias for the default checkpoint, laya/english", "release_date": "2026-09-18T05:13:12+00:00"}
+  ]}
+  ```
 - `model` also accepts any jev model id (anything starting with `jev-`,
   e.g. `jev-latest`, `jev-1.13.0`). It resolves to the default checkpoint,
   the same as omitting `model`, because Laya has nothing like jev's
   versioned model ids.
 
-Set `LAYA_JEV_COMPAT=false` to turn both off. An empty value keeps it on.
+Set `LAYA_JEV_COMPAT=false` to turn all of this off. An empty value keeps it on.
 
 # Building your own image
 
