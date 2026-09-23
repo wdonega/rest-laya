@@ -32,13 +32,26 @@ Test your client against it before relying on it. To turn it off, see
 # Running with Docker
 
 ```bash
+docker run -d --name rest-laya -p 8055:8055 \
+  -e LAYA_MODELS=english \
+  -v rest-laya_hf-cache:/root/.cache/huggingface \
+  ghcr.io/wdonega/rest-laya:cpu
+```
+
+This pulls the prebuilt CPU image (x86 and ARM) and serves on port 8055. The
+first start downloads the model weights into the `rest-laya_hf-cache` volume,
+so later starts are faster; drop the `-v` and every new container downloads
+them again. To change what it runs (checkpoints, auth, ...), pass more `-e`
+variables; see [Configuration](#configuration).
+
+Or, from a clone of this repo, with Compose:
+
+```bash
 docker compose up -d
 ```
 
-This pulls the prebuilt CPU image (`ghcr.io/wdonega/rest-laya:cpu`,
-x86 and ARM) and serves on port 8055. The first start downloads the model
-weights into the `hf-cache` volume, so later starts are faster. To change
-what it runs (checkpoints, auth, ...), see [Configuration](#configuration).
+It runs the same image with the settings from `docker-compose.yml`, and
+shares the same weights volume.
 
 ## With CUDA
 
@@ -209,9 +222,18 @@ All error bodies use jev's envelope, `{"error": {"message", "type", "field_path"
 
 # Configuration
 
-All settings are environment variables, with defaults in
-`docker-compose.yml`. Override them in the shell or in an env file rather
-than editing that file:
+All settings are environment variables. With `docker run`, pass each one
+with `-e`:
+
+```bash
+docker run -d --name rest-laya -p 8055:8055 \
+  -e LAYA_MODELS=english,multilingual -e LAYA_API_TOKEN=secret \
+  -v rest-laya_hf-cache:/root/.cache/huggingface \
+  ghcr.io/wdonega/rest-laya:cpu
+```
+
+With Compose, the defaults are in `docker-compose.yml`. Override them in the
+shell or in an env file rather than editing that file:
 
 ```bash
 LAYA_MODELS=english,multilingual docker compose up -d
