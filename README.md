@@ -25,12 +25,22 @@ uvicorn app.main:app --host 0.0.0.0 --port 8055
 
 ## Running with Docker
 
+`docker-compose.yml` has one service per torch build, each behind a
+[Compose profile](https://docs.docker.com/compose/how-tos/profiles/):
+`cpu` and `cuda`. Pick one per run:
+
 ```bash
-docker compose up --build
+docker compose --profile cpu up --build
 ```
 
-By default this builds a **CPU-only** image: the Dockerfile installs the
-`torch==…+cpu` wheel, which skips ~3GB of CUDA libraries.
+The `cpu` build installs the `torch==…+cpu` wheel, which skips ~3GB of CUDA
+libraries.
+
+To set a host up once instead, `cp .env.example .env` and edit it:
+`COMPOSE_PROFILES` picks the profile, and the `LAYA_*` variables override the
+defaults in `docker-compose.yml` (e.g. which checkpoints to preload). Plain
+`docker compose up -d --build` then uses it. Without a profile, from either
+place, Compose has no service to start.
 
 ## Running with CUDA
 
@@ -38,25 +48,21 @@ Needs a Linux host with an NVIDIA GPU, its driver, and
 [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
 Docker Desktop on macOS can't pass a GPU through, so this doesn't apply there.
 
-No file edits: `docker-compose.cuda.yml` layers the CUDA settings on top of
-`docker-compose.yml` (CUDA torch build, the GPU reservation, more concurrent
-predictions).
+```bash
+docker compose --profile cuda up -d --build
+```
 
-1. On the CUDA host, once: `cp .env.example .env` and uncomment the
-   `COMPOSE_FILE` line.
-2. `docker compose up -d --build`
+(or `COMPOSE_PROFILES=cuda` in `.env`). The `cuda` service installs the CUDA
+torch build, reserves the GPU and runs more predictions at once.
 
-Without a `.env`, the same thing in one line:
-`docker compose -f docker-compose.yml -f docker-compose.cuda.yml up -d --build`.
-
-The CUDA overlay installs `cu132` (CUDA 13.2, e.g. a Jetson Orin on JetPack
-7.2). For a host on another CUDA version, set `TORCH_VARIANT` in `.env` to
-the matching suffix from [PyTorch's wheel index](https://download.pytorch.org/whl/)
+It installs `cu132` (CUDA 13.2, e.g. a Jetson Orin on JetPack 7.2). For a
+host on another CUDA version, set `TORCH_VARIANT` in `.env` to the matching
+suffix from [PyTorch's wheel index](https://download.pytorch.org/whl/)
 (e.g. `cu130`, `cu126`).
 
 No app change is needed: laya picks `cuda` automatically when
 `torch.cuda.is_available()` is true. To confirm, run
-`docker compose exec rest-laya python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_arch_list())"`.
+`docker exec rest-laya python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_arch_list())"`.
 It should print `True`, and the list should include your GPU's arch (e.g.
 `sm_87` on an Orin).
 
