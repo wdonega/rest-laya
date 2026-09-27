@@ -1,16 +1,17 @@
 # Builds the Docker image for each torch variant (cpu, cu132) on native
 # x86 and ARM runners, then merges both architectures into one multi-arch
 # tag per variant on GHCR:
-#   cpu:   latest, latest-cpu, cpu, revN, revN-cpu
-#   cu132: latest-cuda, cu132, revN-cuda
-# on pushes to main, where N is the workflow run number (increments on
-# every run). A release tag v1.2.3 adds 1.2.3-cpu / 1.2.3-cuda.
+#   cpu:   latest, latest-cpu, cpu, 1.0.N, 1.0.N-cpu, revN, revN-cpu
+#   cu132: latest-cuda, cu132, 1.0.N-cuda, revN-cuda
+# on pushes to main, where N is the number of commits up to this one, so it
+# grows with the history. Once both variants are published, it creates the
+# git tag v1.0.N and a GitHub Release with the changes since the previous one.
+# To start a new line (1.1.N, 2.0.N...) change VERSION_PREFIX below.
 name: docker
 
 on:
   push:
     branches: [main]
-    tags: ["v*"]
     # Docs-only pushes don't change the image.
     paths-ignore: ["**.md", "LICENSE", "logo.png"]
   workflow_dispatch:
@@ -19,7 +20,31 @@ permissions:
   contents: read
   packages: write
 
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VERSION_PREFIX: "1.0"
+
 jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      n: ${{ steps.rev.outputs.n }}
+      version: ${{ steps.rev.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The whole history: N counts the commits.
+          fetch-depth: 0
+
+      - id: rev
+        run: |
+          n=$(git rev-list --count HEAD)
+          echo "n=$n" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION_PREFIX.$n" >> "$GITHUB_OUTPUT"
+
   build:
     strategy:
       fail-fast: false
@@ -84,7 +109,7 @@ jobs:
           retention-days: 1
 
   merge:
-    needs: build
+    needs: [version, build]
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -97,6 +122,8 @@ jobs:
     env:
       ON_MAIN: ${{ github.ref_name == github.event.repository.default_branch }}
       IS_CPU: ${{ matrix.variant == 'cpu' }}
+      N: ${{ needs.version.outputs.n }}
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
       - name: Prepare
         run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
@@ -126,9 +153,10 @@ jobs:
             type=raw,value=latest,enable=${{ env.ON_MAIN == 'true' && env.IS_CPU == 'true' }}
             type=raw,value=latest-${{ matrix.alias }},enable=${{ env.ON_MAIN }}
             type=raw,value=${{ matrix.variant }},enable=${{ env.ON_MAIN }}
-            type=raw,value=rev${{ github.run_number }},enable=${{ env.ON_MAIN == 'true' && env.IS_CPU == 'true' }}
-            type=raw,value=rev${{ github.run_number }}-${{ matrix.alias }},enable=${{ env.ON_MAIN }}
-            type=semver,pattern={{version}},suffix=-${{ matrix.alias }}
+            type=raw,value=${{ env.VERSION }},enable=${{ env.ON_MAIN == 'true' && env.IS_CPU == 'true' }}
+            type=raw,value=${{ env.VERSION }}-${{ matrix.alias }},enable=${{ env.ON_MAIN }}
+            type=raw,value=rev${{ env.N }},enable=${{ env.ON_MAIN == 'true' && env.IS_CPU == 'true' }}
+            type=raw,value=rev${{ env.N }}-${{ matrix.alias }},enable=${{ env.ON_MAIN }}
 
       - name: Create multi-arch manifest
         working-directory: /tmp/digests
@@ -139,3 +167,36 @@ jobs:
 
       - name: Inspect
         run: docker buildx imagetools inspect "$(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")"
+
+  # Only after both variants are published, and only for the default branch.
+  # Tags created with GITHUB_TOKEN don't trigger workflows, so this doesn't loop.
+  release:
+    needs: [version, merge]
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # the release and its git tag
+    steps:
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          N: ${{ needs.version.outputs.n }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          tag="v$VERSION"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "$tag already exists (re-run of the same commit): nothing to do"
+            exit 0
+          fi
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          printf '%s\n' \
+            "Docker images for x86 and ARM:" \
+            "" \
+            '```bash' \
+            "docker pull $image:$VERSION-cpu    # also $VERSION, rev$N, rev$N-cpu, latest, latest-cpu" \
+            "docker pull $image:$VERSION-cuda   # also rev$N-cuda, latest-cuda" \
+            '```' \
+            "" \
+            "Commit: $GITHUB_SHA" > notes.md
+          gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" --notes-file notes.md --generate-notes --latest

@@ -331,12 +331,13 @@ x86 and ARM on every push to `main` and publishes them to GHCR
 | | CPU | CUDA |
 |---|---|---|
 | Newest build | `latest`, `latest-cpu`, `cpu` | `latest-cuda`, `cu132` |
-| Pinned build | `revN`, `revN-cpu` | `revN-cuda` |
-| Release (`v1.2.0` git tag) | `1.2.0-cpu` | `1.2.0-cuda` |
+| Pinned build | `1.0.N`, `1.0.N-cpu`, `revN`, `revN-cpu` | `1.0.N-cuda`, `revN-cuda` |
 
-`N` is the workflow run number, which goes up on every run; the Actions
-tab shows which commit each run built. The compose files use `cpu` and
-`cu132`, the value of `TORCH_VARIANT`.
+`N` is the number of commits up to the one built, so it grows with the
+history. Each build on `main` also creates the git tag `v1.0.N` and a
+[GitHub Release](https://github.com/wdonega/rest-laya/releases) listing the
+changes since the previous one. The compose files use `cpu` and `cu132`, the
+value of `TORCH_VARIANT`.
 
 # Running without Docker
 
